@@ -22,17 +22,20 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.apache.maven.artifact.DependencyResolutionRequiredException;
-import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.plugin.MojoFailureException;
-import org.apache.maven.plugins.annotations.Parameter;
+import org.apache.maven.api.PathScope;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.plugin.MojoException;
+import org.apache.maven.api.plugin.annotations.Parameter;
+import org.apache.maven.api.services.DependencyResolver;
+import org.apache.maven.api.services.DependencyResolverException;
 import org.apache.maven.plugins.jdeprscan.consumers.JDeprScanConsumer;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.toolchain.ToolchainManager;
 import org.codehaus.plexus.util.cli.CommandLineUtils.StringStreamConsumer;
 import org.codehaus.plexus.util.cli.Commandline;
 
@@ -43,8 +46,14 @@ import org.codehaus.plexus.util.cli.Commandline;
  * @since 3.0.0
  */
 public abstract class BaseJDeprScanMojo extends AbstractJDeprScanMojo {
-    @Parameter(defaultValue = "${project}", readonly = true, required = true)
-    private MavenProject project;
+    @Inject
+    private Project project;
+
+    @Inject
+    private Session session;
+
+    @Inject
+    private DependencyResolver dependencyResolver;
 
     /**
      * Indicates whether the build will continue even if there are jdeprscan warnings.
@@ -67,12 +76,8 @@ public abstract class BaseJDeprScanMojo extends AbstractJDeprScanMojo {
 
     private final JDeprScanConsumer consumer = new JDeprScanConsumer();
 
-    protected BaseJDeprScanMojo(ToolchainManager toolchainManager) {
-        super(toolchainManager);
-    }
-
     @Override
-    public void execute() throws MojoExecutionException, MojoFailureException {
+    public void execute() throws MojoException {
         if (!Files.exists(getClassesDirectory())) {
             getLog().debug("No classes to scan");
             return;
@@ -80,8 +85,19 @@ public abstract class BaseJDeprScanMojo extends AbstractJDeprScanMojo {
         super.execute();
     }
 
-    protected MavenProject getProject() {
+    protected Project getProject() {
         return project;
+    }
+
+    /**
+     * Resolves the dependencies of the project for the given scope, in the order Maven puts them on a classpath.
+     */
+    protected List<Path> resolveDependencies(PathScope scope) throws MojoException {
+        try {
+            return dependencyResolver.resolve(session, project, scope).getPaths();
+        } catch (DependencyResolverException e) {
+            throw new MojoException(e.getMessage(), e);
+        }
     }
 
     @Override
@@ -95,7 +111,7 @@ public abstract class BaseJDeprScanMojo extends AbstractJDeprScanMojo {
     }
 
     @Override
-    protected final void addJDeprScanOptions(Commandline cmd) throws MojoFailureException {
+    protected final void addJDeprScanOptions(Commandline cmd) throws MojoException {
         super.addJDeprScanOptions(cmd);
 
         if (release != null) {
@@ -104,24 +120,19 @@ public abstract class BaseJDeprScanMojo extends AbstractJDeprScanMojo {
             cmd.createArg().setValue(release);
         }
 
-        try {
-            Collection<Path> cp = getClassPath();
+        Collection<Path> cp = getClassPath();
 
-            if (!cp.isEmpty()) {
-                cmd.createArg().setValue("--class-path");
-                String classpath = cp.stream().map(Path::toString).collect(Collectors.joining(File.pathSeparator));
-                cmd.createArg().setValue(classpath);
-            }
-
-        } catch (DependencyResolutionRequiredException e) {
-            throw new MojoFailureException(e.getMessage(), e);
+        if (!cp.isEmpty()) {
+            cmd.createArg().setValue("--class-path");
+            String classpath = cp.stream().map(Path::toString).collect(Collectors.joining(File.pathSeparator));
+            cmd.createArg().setValue(classpath);
         }
 
         cmd.createArg().setFile(getClassesDirectory().toFile());
     }
 
     @Override
-    protected void verify() throws MojoExecutionException {
+    protected void verify() throws MojoException {
         if (!(consumer.getDeprecatedClasses().isEmpty()
                 && consumer.getDeprecatedMethods().isEmpty())) {
             if (!consumer.getDeprecatedClasses().isEmpty()) {
@@ -149,12 +160,12 @@ public abstract class BaseJDeprScanMojo extends AbstractJDeprScanMojo {
             }
 
             if (failOnWarning) {
-                throw new MojoExecutionException("JDeprScan detected usage of deprecated classes/methods");
+                throw new MojoException("JDeprScan detected usage of deprecated classes/methods");
             }
         }
     }
 
     protected abstract Path getClassesDirectory();
 
-    protected abstract Collection<Path> getClassPath() throws DependencyResolutionRequiredException;
+    protected abstract Collection<Path> getClassPath() throws MojoException;
 }
