@@ -18,12 +18,9 @@
  */
 package org.apache.maven.plugins.jdeprscan;
 
-import javax.inject.Inject;
-
-import org.apache.maven.plugin.MojoFailureException;
-import org.apache.maven.plugins.annotations.Mojo;
-import org.apache.maven.plugins.annotations.Parameter;
-import org.apache.maven.toolchain.ToolchainManager;
+import org.apache.maven.api.plugin.MojoException;
+import org.apache.maven.api.plugin.annotations.Mojo;
+import org.apache.maven.api.plugin.annotations.Parameter;
 import org.codehaus.plexus.util.cli.Commandline;
 
 /**
@@ -32,7 +29,7 @@ import org.codehaus.plexus.util.cli.Commandline;
  * @author Robert Scholte
  * @since 3.0.0
  */
-@Mojo(name = "list", requiresProject = false, requiresDirectInvocation = true)
+@Mojo(name = "list", projectRequired = false)
 public class ListMojo extends AbstractJDeprScanMojo {
     /**
      * Limits scanning or listing to APIs that are deprecated for removal. Can’t be used with a release value of 6, 7,
@@ -41,18 +38,13 @@ public class ListMojo extends AbstractJDeprScanMojo {
     @Parameter(property = "for-removal")
     private boolean forRemoval;
 
-    @Inject
-    public ListMojo(ToolchainManager toolchainManager) {
-        super(toolchainManager);
-    }
-
     @Override
     protected boolean isForRemoval() {
         return forRemoval;
     }
 
     @Override
-    protected void addJDeprScanOptions(Commandline cmd) throws MojoFailureException {
+    protected void addJDeprScanOptions(Commandline cmd) throws MojoException {
         super.addJDeprScanOptions(cmd);
 
         cmd.createArg().setValue("--list");

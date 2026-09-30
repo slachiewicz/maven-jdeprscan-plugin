@@ -22,17 +22,18 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.StringTokenizer;
 
 import org.apache.commons.lang3.SystemUtils;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.plugin.AbstractMojo;
-import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.plugin.MojoFailureException;
-import org.apache.maven.plugins.annotations.Parameter;
-import org.apache.maven.toolchain.Toolchain;
-import org.apache.maven.toolchain.ToolchainManager;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.Toolchain;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.plugin.Log;
+import org.apache.maven.api.plugin.Mojo;
+import org.apache.maven.api.plugin.MojoException;
+import org.apache.maven.api.services.ToolchainManager;
 import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.cli.CommandLineException;
 import org.codehaus.plexus.util.cli.CommandLineUtils;
@@ -44,23 +45,27 @@ import org.codehaus.plexus.util.cli.Commandline;
  * @author Robert Scholte
  * @since 3.0.0
  */
-public abstract class AbstractJDeprScanMojo extends AbstractMojo {
-    @Parameter(defaultValue = "${session}", readonly = true, required = true)
-    private MavenSession session;
+public abstract class AbstractJDeprScanMojo implements Mojo {
+    @Inject
+    private Session session;
 
-    private final ToolchainManager toolchainManager;
+    @Inject
+    private ToolchainManager toolchainManager;
 
-    protected AbstractJDeprScanMojo(ToolchainManager toolchainManager) {
-        this.toolchainManager = toolchainManager;
+    @Inject
+    private Log log;
+
+    protected Log getLog() {
+        return log;
     }
 
     @Override
-    public void execute() throws MojoExecutionException, MojoFailureException {
+    public void execute() throws MojoException {
         String jExecutable;
         try {
             jExecutable = getJDeprScanExecutable();
         } catch (IOException e) {
-            throw new MojoFailureException("Unable to find jdeprscan command: " + e.getMessage(), e);
+            throw new MojoException("Unable to find jdeprscan command: " + e.getMessage(), e);
         }
 
         // Synopsis
@@ -96,11 +101,11 @@ public abstract class AbstractJDeprScanMojo extends AbstractMojo {
         return null;
     }
 
-    protected void verify() throws MojoExecutionException {}
+    protected void verify() throws MojoException {}
 
     protected abstract boolean isForRemoval();
 
-    protected void addJDeprScanOptions(Commandline cmd) throws MojoFailureException {
+    protected void addJDeprScanOptions(Commandline cmd) throws MojoException {
         if (isForRemoval()) {
             cmd.createArg().setValue("--for-removal");
         }
@@ -169,7 +174,7 @@ public abstract class AbstractJDeprScanMojo extends AbstractMojo {
     }
 
     private void executeJDeprScanCommandLine(Commandline cmd, CommandLineUtils.StringStreamConsumer consumer)
-            throws MojoExecutionException {
+            throws MojoException {
         if (getLog().isDebugEnabled()) {
             // no quoted arguments
             getLog().debug("Executing: "
@@ -204,11 +209,11 @@ public abstract class AbstractJDeprScanMojo extends AbstractMojo {
                 msg.append('\n');
                 msg.append("Command line was: ").append(cmd).append('\n').append('\n');
 
-                throw new MojoExecutionException(msg.toString());
+                throw new MojoException(msg.toString());
             }
 
         } catch (CommandLineException e) {
-            throw new MojoExecutionException("Unable to execute jdeprscan command: " + e.getMessage(), e);
+            throw new MojoException("Unable to execute jdeprscan command: " + e.getMessage(), e);
         }
 
         // ----------------------------------------------------------------------
@@ -228,21 +233,27 @@ public abstract class AbstractJDeprScanMojo extends AbstractMojo {
     }
 
     private Toolchain getToolchain() {
-        Toolchain tc = null;
-        if (toolchainManager != null) {
-            tc = toolchainManager.getToolchainFromBuildContext("jdk", session);
+        return selectToolchain(toolchainManager, session);
+    }
 
-            if (tc == null) {
-                List<Toolchain> tcs =
-                        toolchainManager.getToolchains(session, "jdk", Collections.singletonMap("version", "[9,)"));
-
-                if (tcs != null && tcs.size() > 0) {
-                    // pick up latest, jdeps of JDK9 has more options compared to JDK8
-                    tc = tcs.get(tcs.size() - 1);
-                }
-            }
+    /**
+     * Picks the toolchain that provides {@code jdeprscan}: the one selected by the toolchains plugin, else the newest
+     * JDK 9+ toolchain (the {@code jdeprscan} of JDK 9 has more options than the one of JDK 8).
+     */
+    static Toolchain selectToolchain(ToolchainManager toolchainManager, Session session) {
+        if (toolchainManager == null) {
+            return null;
         }
-
-        return tc;
+        Optional<Toolchain> fromBuildContext = toolchainManager.getToolchainFromBuildContext(session, "jdk");
+        if (fromBuildContext.isPresent()) {
+            return fromBuildContext.get();
+        }
+        List<Toolchain> tcs =
+                toolchainManager.getToolchains(session, "jdk", Collections.singletonMap("version", "[9,)"));
+        if (tcs != null && !tcs.isEmpty()) {
+            // pick up latest
+            return tcs.get(tcs.size() - 1);
+        }
+        return null;
     }
 }

@@ -18,8 +18,6 @@
  */
 package org.apache.maven.plugins.jdeprscan;
 
-import javax.inject.Inject;
-
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collection;
@@ -27,11 +25,9 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import org.apache.maven.artifact.DependencyResolutionRequiredException;
-import org.apache.maven.plugins.annotations.LifecyclePhase;
-import org.apache.maven.plugins.annotations.Mojo;
-import org.apache.maven.plugins.annotations.ResolutionScope;
-import org.apache.maven.toolchain.ToolchainManager;
+import org.apache.maven.api.PathScope;
+import org.apache.maven.api.plugin.MojoException;
+import org.apache.maven.api.plugin.annotations.Mojo;
 
 /**
  * Scans test classes with jdeprscan.
@@ -39,17 +35,8 @@ import org.apache.maven.toolchain.ToolchainManager;
  * @author Robert Scholte
  * @since 3.0.0
  */
-@Mojo(
-        name = "test-jdeprscan",
-        requiresDependencyResolution = ResolutionScope.TEST,
-        defaultPhase = LifecyclePhase.PROCESS_TEST_CLASSES,
-        threadSafe = true)
+@Mojo(name = "test-jdeprscan", defaultPhase = "process-test-classes")
 public class TestJDeprScanMojo extends BaseJDeprScanMojo {
-
-    @Inject
-    public TestJDeprScanMojo(ToolchainManager toolchainManager) {
-        super(toolchainManager);
-    }
 
     @Override
     protected Path getClassesDirectory() {
@@ -57,13 +44,11 @@ public class TestJDeprScanMojo extends BaseJDeprScanMojo {
     }
 
     @Override
-    protected Collection<Path> getClassPath() throws DependencyResolutionRequiredException {
-        Set<Path> classPath =
-                new LinkedHashSet<>(getProject().getTestClasspathElements().size());
-
-        for (String elm : getProject().getTestClasspathElements()) {
-            classPath.add(Paths.get(elm));
-        }
+    protected Collection<Path> getClassPath() throws MojoException {
+        Set<Path> classPath = new LinkedHashSet<>();
+        classPath.add(getClassesDirectory());
+        classPath.add(Paths.get(getProject().getBuild().getOutputDirectory()));
+        classPath.addAll(resolveDependencies(PathScope.TEST_COMPILE));
 
         return Collections.unmodifiableSet(classPath);
     }
